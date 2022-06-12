@@ -1,0 +1,119 @@
+pipeline{
+    agent any
+    
+    parameters{
+        choice( name: 'state', choices: "start\nstop", description: 'select the state')
+    }
+    stages{
+        stage('Initializing Mongo Cluster'){
+            when{
+                expression { state == 'start' }
+            }
+                steps{
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: 'AWS Credentials', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                        script{
+                            sh """
+                                aws ec2 $state-instances --instance-ids instance-ID --region ap-south-1   
+                                sleep 1m 30s
+                                aws ec2 $state-instances --instance-ids instance-ID --region ap-south-1  
+                                """
+                        }
+                }
+            }
+        }        
+        stage('Initializing Mongo Cluster'){
+            when {
+                expression { state == 'start' }
+            }
+                steps{
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: 'AWS Credentials', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                        script{
+                            sh """
+                                aws ec2 $state-instances --instance-ids instance-ID --region ap-south-1   
+                                sleep 10s
+                                aws ec2 $state-instances --instance-ids i-0f2f7aaa4b1725344 --region ap-south-1
+                                sleep 10s  
+                                """
+                        }
+                    }
+                } 
+        }
+        stage('Initializing ElasticSearch Cluster'){
+            when{
+                expression { state == 'start' }
+            }
+            steps{
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: 'AWS Credentials', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                    script{
+                        sh """
+                            aws ec2 $state-instances --instance-ids i-08b16cb15ffff2d3f --region ap-south-1   
+                            sleep 10s
+                            aws ec2 $state-instances --instance-ids i-003c39ed4fcf2fc2c --region ap-south-1  
+                        """
+                    }
+                }
+            }
+        }
+        stage('Initializing ElasticSearch Containers'){
+            when{
+                expression { state == 'start' }
+            }
+            steps{
+                script{
+                        sh """                            
+                            ssh -tt -o StrictHostKeyChecking=no ec2-user@serverIP << EOF 
+                            cd path_of_script 
+                            ./script.sh
+                            sleep 1m                                      
+                            exit
+                            EOF
+                            
+                        """
+                }
+            }
+        }
+        stage('starting openresty in DL instances (1/2)'){
+            when{
+                expression { state == 'start' }
+            }
+            steps{
+                script{
+                        sh """                            
+                            ssh -tt -o StrictHostKeyChecking=no ec2-user@server_IP << EOF 
+                            sudo su
+                            nginx  
+                            sleep 10s                                     
+                            exit
+                            exit
+                            EOF
+                            
+                        """
+                }
+            }
+        }
+        }        
+        stage('Stopping the Environment'){
+            when{
+                expression { state == 'stop' }
+            }
+            steps{
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: 'AWS Credentials', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                    script{
+                        sh """
+                            aws ec2 $state-instances --instance-ids instance_IP --region ap-south-1  
+                            aws ec2 $state-instances --instance-ids instance_IP --region ap-south-1  
+                            """
+                    }
+                }
+            }
+            
+        }            
+    }
+    post {
+        always {
+            emailext body:  "*JOB_STATUS: ${currentBuild.currentResult}:*\nJOB_NAME: ${env.JOB_NAME}\nUSER_NAME: ${env.BUILD_USER}\nBUILD_NO: ${env.BUILD_NUMBER}\nMore info at: ${env.BUILD_URL}\nMessage: Sucessfully ${env.state} the Env", 
+            recipientProviders: [[$class: 'DevelopersRecipientProvider'],
+            [$class: 'RequesterRecipientProvider']], subject: 'Env Status'     
+        }
+    }
+}

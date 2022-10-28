@@ -1,0 +1,76 @@
+@library("product-pipelines-shared-library") _
+
+def repo_type  = env.BRANCH_NAME == "master" ? "latest" : "dev"
+
+pipeline {
+    agent{
+        label "sca-python3-9"
+    }
+
+    options {
+        ansiColor 'xterm'
+        timestamps()
+    }
+
+    environment {
+        PATH = "$HOME/.local/bin:${env.PATH}"
+    }
+
+    stages{
+        stage("Prepare") {
+            steps{
+                withCredentials([usernamePassword(credentilsId: "artifactory-jenkins-reader", usernameVariable: 'ARTIFACTORY_USERNAME', passwordVariable: 'ARTIFACTORY_PASSWORD')])  {
+                    sh "poetry config http-basic.cyberark-artifactory '${ARTIFACTORY_USERNAME}' '${ARTIFACTORY_PASSWORD}'"
+                }
+                sh "poetry install"
+                }
+        }
+        stage("Code Verification") {
+            parallel {
+                stage("Unit Tests") {
+                    steps{
+                        sh "poetry run pytest test"
+                    }
+                }
+                stage("Code analysis - pylint (errors)") {
+                    steps{
+                        sh "poetry run pylint src -E"
+                    }
+                }
+                stage("Code analysis - pylint (full)") {
+                    steps{
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            sh "poetry run pylint src"
+                        }
+                    }
+                }
+                stage("Synk") {
+                    steps{
+                        synkSecurity(monitorProjectOnBuild: true,
+                                    organisation: "sca-j1c",
+                                    synkInstallation: "SynkLatest",
+                                    synkTokenId: "Cloud-Sec_Synk_Token",
+                                    severity: "high",
+                                    failOnIssues: "false",
+                                    projectName: "sca-e2e",
+                                    additionalArguments: "--fail-on=upgradable --file=poetry.lock --package-manager=poetry -- --skip-unresolved=true --debug")
+                    }
+                }
+            }
+        }
+/*        
+        stage("Verify E2E") {
+            when {
+                expression {
+                    env.CHANGE_TARGET == "master"
+                }
+            }
+            steps{
+                sh 'env'
+                build job: '/Cloud-Sec/Cloud-Sec-e2e/master/Run-E2E',
+                    parameters: [string(name: 'BRANCH', value: env.GIT_COMMIT)]
+            }
+        }
+*/
+    }
+}
